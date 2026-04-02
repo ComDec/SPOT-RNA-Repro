@@ -6,6 +6,7 @@ from unittest import mock
 
 import torch
 
+import evaluate_spotrna_ensemble
 import train_spotrna
 
 
@@ -156,6 +157,94 @@ class TrainCheckpointStateTests(unittest.TestCase):
             self.assertEqual(last_checkpoint["best_val_f1"], 0.72)
             self.assertEqual(last_checkpoint["best_threshold"], 0.45)
             self.assertEqual(last_checkpoint["best_epoch"], 3)
+
+
+class EnsembleWorkerTests(unittest.TestCase):
+    @mock.patch("evaluate_spotrna_ensemble.compute_metrics_for_threshold")
+    @mock.patch("evaluate_spotrna_ensemble.collect_ensemble_predictions")
+    @mock.patch("evaluate_spotrna_ensemble.load_model")
+    @mock.patch("evaluate_spotrna_ensemble.build_loader")
+    @mock.patch("evaluate_spotrna_ensemble.parse_args")
+    def test_main_respects_zero_num_workers(
+        self,
+        parse_args,
+        build_loader,
+        load_model,
+        collect_ensemble_predictions,
+        compute_metrics_for_threshold,
+    ):
+        parse_args.return_value = argparse.Namespace(
+            phase="finetune",
+            datasets_dir="datasets",
+            checkpoints=["demo.pt"],
+            device="cpu",
+            batch_size=1,
+            num_workers=0,
+            drop_multiplets=False,
+            output_json="",
+        )
+        build_loader.side_effect = [mock.sentinel.val_loader, mock.sentinel.test_loader]
+        load_model.return_value = mock.Mock()
+        collect_ensemble_predictions.side_effect = [([], 0.0), ([], 0.0)]
+        compute_metrics_for_threshold.return_value = {
+            "threshold": 0.5,
+            "f1": 0.0,
+            "mcc": 0.0,
+            "precision": 0.0,
+            "sensitivity": 0.0,
+        }
+
+        with mock.patch(
+            "evaluate_spotrna_ensemble.torch.load",
+            return_value={"feature_mean": None, "feature_std": None},
+        ):
+            evaluate_spotrna_ensemble.main()
+
+        self.assertEqual(build_loader.call_args_list[0].args[4], 0)
+        self.assertEqual(build_loader.call_args_list[1].args[4], 0)
+
+    @mock.patch("evaluate_spotrna_ensemble.compute_metrics_for_threshold")
+    @mock.patch("evaluate_spotrna_ensemble.collect_ensemble_predictions")
+    @mock.patch("evaluate_spotrna_ensemble.load_model")
+    @mock.patch("evaluate_spotrna_ensemble.build_loader")
+    @mock.patch("evaluate_spotrna_ensemble.parse_args")
+    def test_main_keeps_nonzero_num_workers(
+        self,
+        parse_args,
+        build_loader,
+        load_model,
+        collect_ensemble_predictions,
+        compute_metrics_for_threshold,
+    ):
+        parse_args.return_value = argparse.Namespace(
+            phase="pretrain",
+            datasets_dir="datasets",
+            checkpoints=["demo.pt"],
+            device="cpu",
+            batch_size=1,
+            num_workers=3,
+            drop_multiplets=False,
+            output_json="",
+        )
+        build_loader.side_effect = [mock.sentinel.val_loader, mock.sentinel.test_loader]
+        load_model.return_value = mock.Mock()
+        collect_ensemble_predictions.side_effect = [([], 0.0), ([], 0.0)]
+        compute_metrics_for_threshold.return_value = {
+            "threshold": 0.5,
+            "f1": 0.0,
+            "mcc": 0.0,
+            "precision": 0.0,
+            "sensitivity": 0.0,
+        }
+
+        with mock.patch(
+            "evaluate_spotrna_ensemble.torch.load",
+            return_value={"feature_mean": None, "feature_std": None},
+        ):
+            evaluate_spotrna_ensemble.main()
+
+        self.assertEqual(build_loader.call_args_list[0].args[4], 3)
+        self.assertEqual(build_loader.call_args_list[1].args[4], 3)
 
 
 if __name__ == "__main__":
