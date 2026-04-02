@@ -142,9 +142,7 @@ def main():
     )
     feature_mean = checkpoint0.get("feature_mean")
     feature_std = checkpoint0.get("feature_std")
-    effective_workers = max(
-        args.num_workers, 4 if phase["dataset_type"] == "bpRNA" else 2
-    )
+    effective_workers = args.num_workers
 
     val_loader = build_loader(
         archive_path,

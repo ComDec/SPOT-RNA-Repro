@@ -1,0 +1,293 @@
+import argparse
+import os
+import tempfile
+import unittest
+from unittest import mock
+
+import torch
+
+import evaluate_spotrna_ensemble
+import profile_training_pipeline
+import train_spotrna
+
+
+class TrainCheckpointStateTests(unittest.TestCase):
+    def test_update_best_checkpoint_state_uses_new_best_epoch(self):
+        best_val_f1, best_threshold, best_epoch, is_new_best = (
+            train_spotrna.update_best_checkpoint_state(
+                best_val_f1=0.61,
+                best_threshold=0.30,
+                best_epoch=2,
+                val_metrics={"f1": 0.72, "threshold": 0.45},
+                epoch_idx=3,
+            )
+        )
+
+        self.assertEqual(best_val_f1, 0.72)
+        self.assertEqual(best_threshold, 0.45)
+        self.assertEqual(best_epoch, 3)
+        self.assertTrue(is_new_best)
+
+    def test_update_best_checkpoint_state_keeps_existing_best(self):
+        best_val_f1, best_threshold, best_epoch, is_new_best = (
+            train_spotrna.update_best_checkpoint_state(
+                best_val_f1=0.72,
+                best_threshold=0.45,
+                best_epoch=3,
+                val_metrics={"f1": 0.70, "threshold": 0.40},
+                epoch_idx=4,
+            )
+        )
+
+        self.assertEqual(best_val_f1, 0.72)
+        self.assertEqual(best_threshold, 0.45)
+        self.assertEqual(best_epoch, 3)
+        self.assertFalse(is_new_best)
+
+    def test_main_writes_updated_best_metadata_to_last_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            datasets_dir = os.path.join(temp_dir, "datasets")
+            os.makedirs(datasets_dir)
+            open(os.path.join(datasets_dir, "bpRNA_dataset.zip"), "wb").close()
+
+            output_dir = os.path.join(temp_dir, "outputs")
+            resume_checkpoint = os.path.join(temp_dir, "resume.pt")
+            run_name = "resume-regression"
+            args = argparse.Namespace(
+                phase="pretrain",
+                datasets_dir=datasets_dir,
+                preset="paper-small",
+                epochs=3,
+                batch_size=1,
+                learning_rate=1e-3,
+                positive_weight="auto",
+                threshold=0.335,
+                device="cpu",
+                amp=False,
+                amp_dtype="bf16",
+                seed=7,
+                init_checkpoint="",
+                output_dir=output_dir,
+                run_name=run_name,
+                max_train_samples=0,
+                max_val_samples=0,
+                max_test_samples=0,
+                save_every_epoch=False,
+                resume_checkpoint=resume_checkpoint,
+                num_workers=0,
+                drop_multiplets=False,
+                log_interval=0,
+                threshold_min=0.1,
+                threshold_max=0.2,
+                threshold_step=0.05,
+                standardize_input=False,
+            )
+            val_metrics = {
+                "loss": 0.2,
+                "f1": 0.72,
+                "mcc": 0.5,
+                "threshold": 0.45,
+            }
+            test_metrics = {
+                "loss": 0.1,
+                "f1": 0.7,
+                "precision": 0.71,
+                "sensitivity": 0.69,
+                "mcc": 0.4,
+            }
+
+            resumed_model = torch.nn.Linear(1, 1)
+            resumed_optimizer = torch.optim.Adam(
+                resumed_model.parameters(), lr=args.learning_rate
+            )
+            torch.save(
+                {
+                    "state_dict": resumed_model.state_dict(),
+                    "optimizer_state_dict": resumed_optimizer.state_dict(),
+                    "args": {},
+                    "model_config": {},
+                    "history": [{"epoch": 2, "val": {"f1": 0.61}}],
+                    "epoch": 2,
+                    "best_val_f1": 0.61,
+                    "best_threshold": 0.30,
+                    "best_epoch": 2,
+                    "feature_mean": None,
+                    "feature_std": None,
+                },
+                resume_checkpoint,
+            )
+
+            with (
+                mock.patch.object(train_spotrna, "parse_args", return_value=args),
+                mock.patch.object(train_spotrna, "set_seed"),
+                mock.patch.object(
+                    train_spotrna,
+                    "PaperInspiredSPOTRNA",
+                    side_effect=lambda **_: torch.nn.Linear(1, 1),
+                ),
+                mock.patch.object(
+                    train_spotrna,
+                    "RNAPairDataset",
+                    side_effect=[object(), object(), object()],
+                ),
+                mock.patch.object(
+                    train_spotrna,
+                    "build_dataloader",
+                    side_effect=[object(), object(), object()],
+                ),
+                mock.patch.object(train_spotrna, "train_one_epoch", return_value=1.23),
+                mock.patch.object(
+                    train_spotrna,
+                    "search_best_threshold",
+                    return_value=val_metrics,
+                ),
+                mock.patch.object(
+                    train_spotrna,
+                    "evaluate_model",
+                    return_value=test_metrics,
+                ),
+            ):
+                train_spotrna.main()
+
+            last_checkpoint = torch.load(
+                os.path.join(output_dir, run_name, "last.pt"),
+                map_location="cpu",
+                weights_only=False,
+            )
+
+            self.assertEqual(last_checkpoint["best_val_f1"], 0.72)
+            self.assertEqual(last_checkpoint["best_threshold"], 0.45)
+            self.assertEqual(last_checkpoint["best_epoch"], 3)
+
+
+class EnsembleWorkerTests(unittest.TestCase):
+    @mock.patch("evaluate_spotrna_ensemble.compute_metrics_for_threshold")
+    @mock.patch("evaluate_spotrna_ensemble.collect_ensemble_predictions")
+    @mock.patch("evaluate_spotrna_ensemble.load_model")
+    @mock.patch("evaluate_spotrna_ensemble.build_loader")
+    @mock.patch("evaluate_spotrna_ensemble.parse_args")
+    def test_main_respects_zero_num_workers(
+        self,
+        parse_args,
+        build_loader,
+        load_model,
+        collect_ensemble_predictions,
+        compute_metrics_for_threshold,
+    ):
+        parse_args.return_value = argparse.Namespace(
+            phase="finetune",
+            datasets_dir="datasets",
+            checkpoints=["demo.pt"],
+            device="cpu",
+            batch_size=1,
+            num_workers=0,
+            drop_multiplets=False,
+            output_json="",
+        )
+        build_loader.side_effect = [mock.sentinel.val_loader, mock.sentinel.test_loader]
+        load_model.return_value = mock.Mock()
+        collect_ensemble_predictions.side_effect = [([], 0.0), ([], 0.0)]
+        compute_metrics_for_threshold.return_value = {
+            "threshold": 0.5,
+            "f1": 0.0,
+            "mcc": 0.0,
+            "precision": 0.0,
+            "sensitivity": 0.0,
+        }
+
+        with mock.patch(
+            "evaluate_spotrna_ensemble.torch.load",
+            return_value={"feature_mean": None, "feature_std": None},
+        ):
+            evaluate_spotrna_ensemble.main()
+
+        self.assertEqual(build_loader.call_args_list[0].args[4], 0)
+        self.assertEqual(build_loader.call_args_list[1].args[4], 0)
+
+    @mock.patch("evaluate_spotrna_ensemble.compute_metrics_for_threshold")
+    @mock.patch("evaluate_spotrna_ensemble.collect_ensemble_predictions")
+    @mock.patch("evaluate_spotrna_ensemble.load_model")
+    @mock.patch("evaluate_spotrna_ensemble.build_loader")
+    @mock.patch("evaluate_spotrna_ensemble.parse_args")
+    def test_main_keeps_nonzero_num_workers(
+        self,
+        parse_args,
+        build_loader,
+        load_model,
+        collect_ensemble_predictions,
+        compute_metrics_for_threshold,
+    ):
+        parse_args.return_value = argparse.Namespace(
+            phase="pretrain",
+            datasets_dir="datasets",
+            checkpoints=["demo.pt"],
+            device="cpu",
+            batch_size=1,
+            num_workers=3,
+            drop_multiplets=False,
+            output_json="",
+        )
+        build_loader.side_effect = [mock.sentinel.val_loader, mock.sentinel.test_loader]
+        load_model.return_value = mock.Mock()
+        collect_ensemble_predictions.side_effect = [([], 0.0), ([], 0.0)]
+        compute_metrics_for_threshold.return_value = {
+            "threshold": 0.5,
+            "f1": 0.0,
+            "mcc": 0.0,
+            "precision": 0.0,
+            "sensitivity": 0.0,
+        }
+
+        with mock.patch(
+            "evaluate_spotrna_ensemble.torch.load",
+            return_value={"feature_mean": None, "feature_std": None},
+        ):
+            evaluate_spotrna_ensemble.main()
+
+        self.assertEqual(build_loader.call_args_list[0].args[4], 3)
+        self.assertEqual(build_loader.call_args_list[1].args[4], 3)
+
+
+class ProfileTrainingPipelineTests(unittest.TestCase):
+    def test_require_cuda_returns_cuda_device(self):
+        with mock.patch(
+            "profile_training_pipeline.torch.cuda.is_available", return_value=True
+        ):
+            device = profile_training_pipeline.require_cuda()
+
+        self.assertEqual(device.type, "cuda")
+
+    def test_require_cuda_raises_clear_error_without_cuda(self):
+        with mock.patch(
+            "profile_training_pipeline.torch.cuda.is_available", return_value=False
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "profile_training_pipeline.py requires CUDA"
+            ):
+                profile_training_pipeline.require_cuda()
+
+    def test_main_raises_before_dataset_setup_without_cuda(self):
+        with (
+            mock.patch(
+                "profile_training_pipeline.torch.cuda.is_available", return_value=False
+            ),
+            mock.patch("profile_training_pipeline.RNAPairDataset") as dataset_cls,
+            mock.patch(
+                "profile_training_pipeline.compute_feature_stats",
+                return_value=(mock.sentinel.mean, mock.sentinel.std),
+            ),
+            mock.patch(
+                "profile_training_pipeline.build_dataloader",
+                return_value=[],
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "profile_training_pipeline.py requires CUDA"
+            ):
+                profile_training_pipeline.main()
+
+        dataset_cls.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

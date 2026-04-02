@@ -196,6 +196,18 @@ def train_one_epoch(
     return total_loss / max(total_samples, 1)
 
 
+def update_best_checkpoint_state(
+    best_val_f1,
+    best_threshold,
+    best_epoch,
+    val_metrics,
+    epoch_idx,
+):
+    if val_metrics["f1"] > best_val_f1:
+        return val_metrics["f1"], val_metrics["threshold"], epoch_idx, True
+    return best_val_f1, best_threshold, best_epoch, False
+
+
 def save_checkpoint(
     path,
     model,
@@ -384,8 +396,6 @@ def main():
         val_metrics = search_best_threshold(
             model, val_loader, device, thresholds=threshold_grid
         )
-        best_threshold = val_metrics["threshold"]
-
         epoch_record = {
             "epoch": epoch_idx,
             "train_loss": train_loss,
@@ -404,6 +414,16 @@ def main():
             )
         )
 
+        best_val_f1, best_threshold, best_epoch, is_new_best = (
+            update_best_checkpoint_state(
+                best_val_f1,
+                best_threshold,
+                best_epoch,
+                val_metrics,
+                epoch_idx,
+            )
+        )
+
         save_checkpoint(
             last_checkpoint_path,
             model,
@@ -413,7 +433,7 @@ def main():
             history,
             epoch_idx,
             best_val_f1,
-            val_metrics["threshold"],
+            best_threshold,
             best_epoch,
             feature_mean,
             feature_std,
@@ -429,16 +449,13 @@ def main():
                 history,
                 epoch_idx,
                 best_val_f1,
-                val_metrics["threshold"],
+                best_threshold,
                 best_epoch,
                 feature_mean,
                 feature_std,
             )
 
-        if val_metrics["f1"] > best_val_f1:
-            best_val_f1 = val_metrics["f1"]
-            best_threshold = val_metrics["threshold"]
-            best_epoch = epoch_idx
+        if is_new_best:
             save_checkpoint(
                 best_checkpoint_path,
                 model,
