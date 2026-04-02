@@ -165,7 +165,7 @@ These scripts are kept in the repository for extended experiments and maintenanc
 - `run_repro_ensemble.sh`: single-GPU helper that pretrains, fine-tunes, and evaluates a five-model reproduced ensemble.
 - `run_paper_reproduction_2gpu.sh`: two-GPU helper for a longer paper-style reproduction run across the five presets.
 - `repair_run_thresholds.py`: repair missing or stale `best_threshold` metadata in an existing training run.
-- `profile_training_pipeline.py`: lightweight loader and step-time profiling for the PyTorch training stack.
+- `profile_training_pipeline.py`: lightweight CUDA-only loader and training-step profiling for the PyTorch training stack.
 
 ## Repository layout
 
