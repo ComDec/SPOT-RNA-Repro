@@ -7,6 +7,7 @@ from unittest import mock
 import torch
 
 import evaluate_spotrna_ensemble
+import profile_training_pipeline
 import train_spotrna
 
 
@@ -245,6 +246,25 @@ class EnsembleWorkerTests(unittest.TestCase):
 
         self.assertEqual(build_loader.call_args_list[0].args[4], 3)
         self.assertEqual(build_loader.call_args_list[1].args[4], 3)
+
+
+class ProfileTrainingPipelineTests(unittest.TestCase):
+    def test_require_cuda_returns_cuda_device(self):
+        with mock.patch(
+            "profile_training_pipeline.torch.cuda.is_available", return_value=True
+        ):
+            device = profile_training_pipeline.require_cuda()
+
+        self.assertEqual(device.type, "cuda")
+
+    def test_require_cuda_raises_clear_error_without_cuda(self):
+        with mock.patch(
+            "profile_training_pipeline.torch.cuda.is_available", return_value=False
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "profile_training_pipeline.py requires CUDA"
+            ):
+                profile_training_pipeline.require_cuda()
 
 
 if __name__ == "__main__":

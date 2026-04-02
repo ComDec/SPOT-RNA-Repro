@@ -13,6 +13,12 @@ from utils.training_utils import (
 )
 
 
+def require_cuda():
+    if not torch.cuda.is_available():
+        raise RuntimeError("profile_training_pipeline.py requires CUDA")
+    return torch.device("cuda")
+
+
 def main():
     os.environ.setdefault("TMPDIR", os.path.abspath(".tmp"))
     archive_path = "datasets/bpRNA_dataset.zip"
@@ -46,7 +52,7 @@ def main():
                 break
         print(f"loader workers={workers} seconds={time.time() - start:.3f}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = require_cuda()
     model = PaperInspiredSPOTRNA(
         **{
             "channels": 64,
