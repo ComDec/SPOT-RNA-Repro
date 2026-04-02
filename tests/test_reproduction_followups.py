@@ -266,6 +266,28 @@ class ProfileTrainingPipelineTests(unittest.TestCase):
             ):
                 profile_training_pipeline.require_cuda()
 
+    def test_main_raises_before_dataset_setup_without_cuda(self):
+        with (
+            mock.patch(
+                "profile_training_pipeline.torch.cuda.is_available", return_value=False
+            ),
+            mock.patch("profile_training_pipeline.RNAPairDataset") as dataset_cls,
+            mock.patch(
+                "profile_training_pipeline.compute_feature_stats",
+                return_value=(mock.sentinel.mean, mock.sentinel.std),
+            ),
+            mock.patch(
+                "profile_training_pipeline.build_dataloader",
+                return_value=[],
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "profile_training_pipeline.py requires CUDA"
+            ):
+                profile_training_pipeline.main()
+
+        dataset_cls.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

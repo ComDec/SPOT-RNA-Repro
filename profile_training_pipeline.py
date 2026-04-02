@@ -20,6 +20,7 @@ def require_cuda():
 
 
 def main():
+    device = require_cuda()
     os.environ.setdefault("TMPDIR", os.path.abspath(".tmp"))
     archive_path = "datasets/bpRNA_dataset.zip"
     train_dataset = RNAPairDataset(
@@ -52,7 +53,6 @@ def main():
                 break
         print(f"loader workers={workers} seconds={time.time() - start:.3f}")
 
-    device = require_cuda()
     model = PaperInspiredSPOTRNA(
         **{
             "channels": 64,
