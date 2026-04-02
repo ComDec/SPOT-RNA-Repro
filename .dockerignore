@@ -1,28 +1,19 @@
+.git
+.gitignore
 .worktrees/
 .tmp/
-
-# Python and tool caches
 __pycache__/
 *.pyc
 .ruff_cache/
 .pytest_cache/
-
-# Runtime outputs
 logs/
 outputs/
 outputs_*/
 profiling/
-
-# Official model downloads
 SPOT-RNA-models/
-
-# Training and evaluation artifacts
 training_runs/
 training_runs*/
-
-# Dataset archives and caches
 datasets/.spotrna_cache/
 datasets/*.zip
-
-# TensorFlow inference intermediates
 input_tfr_files/*.tfrecords
+docs/
