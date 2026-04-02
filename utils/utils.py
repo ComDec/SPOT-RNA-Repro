@@ -7,6 +7,15 @@ from subprocess import PIPE
 import pandas as pd
 
 
+def resolve_output_path(raw_output_path, base_path):
+    if os.path.isabs(raw_output_path):
+        output_path = raw_output_path
+    else:
+        output_path = os.path.join(base_path, raw_output_path)
+    os.makedirs(output_path, exist_ok=True)
+    return output_path
+
+
 # ------------- one hot encoding of RNA sequences -----------------#
 def one_hot(seq):
     RNN_seq = seq
@@ -84,7 +93,6 @@ def _bytes_feature(value):
 def create_tfr_files(all_seq, base_path, input_file):
 
     print("\nPreparing tfr records file for SPOT-RNA:")
-    os.makedirs(os.path.join(base_path, "input_tfr_files"), exist_ok=True)
     path_tfrecords = os.path.join(
         base_path, "input_tfr_files", input_file + ".tfrecords"
     )
@@ -369,23 +377,13 @@ def prob_to_secondary_structure(
 
     tertiary_bp = "".join(str_tertiary)
 
-    if args.outputs == "outputs/":
-        output_path = os.path.join(base_path, args.outputs)
-    else:
-        output_path = args.outputs
+    output_path = resolve_output_path(args.outputs, base_path)
 
     os.makedirs(output_path, exist_ok=True)
 
     ct_file_output(pred_pairs, seq, name, output_path)
     bpseq_file_output(pred_pairs, seq, name, output_path)
-    prob_path = os.path.join(output_path, name + ".prob")
-    ct_path = os.path.join(output_path, name + ".ct")
-    radiate_plot_path = os.path.join(output_path, name + "_radiate.png")
-    line_plot_path = os.path.join(output_path, name + "_line.png")
-    st_path = os.path.join(output_path, name + ".st")
-    dbn_path = os.path.join(output_path, name + ".dbn")
-
-    np.savetxt(prob_path, y_pred, delimiter="\t")
+    np.savetxt(os.path.join(output_path, name + ".prob"), y_pred, delimiter="\t")
 
     if args.plots:
         try:
@@ -396,9 +394,9 @@ def prob_to_secondary_structure(
                     base_path + "/utils/VARNAv3-93.jar",
                     "fr.orsay.lri.varna.applications.VARNAcmd",
                     "-i",
-                    ct_path,
+                    os.path.join(output_path, name + ".ct"),
                     "-o",
-                    radiate_plot_path,
+                    os.path.join(output_path, name + "_radiate.png"),
                     "-algorithm",
                     "radiate",
                     "-resolution",
@@ -418,9 +416,9 @@ def prob_to_secondary_structure(
                     base_path + "/utils/VARNAv3-93.jar",
                     "fr.orsay.lri.varna.applications.VARNAcmd",
                     "-i",
-                    ct_path,
+                    os.path.join(output_path, name + ".ct"),
                     "-o",
-                    line_plot_path,
+                    os.path.join(output_path, name + "_line.png"),
                     "-algorithm",
                     "line",
                     "-resolution",
@@ -446,10 +444,10 @@ def prob_to_secondary_structure(
             )
             time.sleep(0.1)
             # print(os.path.exists(output_path + '/' + name + '.st'))
-            with open(st_path) as f:
+            with open(os.path.join(output_path, name + ".st")) as f:
                 df = pd.read_csv(f, comment="#", sep=";", header=None)
             np.savetxt(
-                dbn_path,
+                os.path.join(output_path, name + ".dbn"),
                 np.array([df[0][0], df[0][1]]),
                 fmt="%s",
                 header=">" + name,
