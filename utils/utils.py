@@ -379,6 +379,8 @@ def prob_to_secondary_structure(
 
     output_path = resolve_output_path(args.outputs, base_path)
 
+    os.makedirs(output_path, exist_ok=True)
+
     ct_file_output(pred_pairs, seq, name, output_path)
     bpseq_file_output(pred_pairs, seq, name, output_path)
     np.savetxt(os.path.join(output_path, name + ".prob"), y_pred, delimiter="\t")
