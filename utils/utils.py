@@ -6,14 +6,20 @@ from tqdm import tqdm
 from subprocess import PIPE
 import pandas as pd
 
+
 # ------------- one hot encoding of RNA sequences -----------------#
 def one_hot(seq):
     RNN_seq = seq
-    BASES = 'AUCG'
+    BASES = "AUCG"
     bases = np.array([base for base in BASES])
     feat = np.concatenate(
-        [[(bases == base.upper()).astype(int)] if str(base).upper() in BASES else np.array([[-1] * len(BASES)]) for base
-         in RNN_seq])
+        [
+            [(bases == base.upper()).astype(int)]
+            if str(base).upper() in BASES
+            else np.array([[-1] * len(BASES)])
+            for base in RNN_seq
+        ]
+    )
 
     return feat
 
@@ -37,15 +43,22 @@ def l_mask(inp, seq_len):
 def get_data(seq):
     seq_len = len(seq)
     one_hot_feat = one_hot(seq)
-    #print(one_hot_feat[-1])
+    # print(one_hot_feat[-1])
     zero_mask = z_mask(seq_len)[None, :, :, None]
     label_mask = l_mask(one_hot_feat, seq_len)
     temp = one_hot_feat[None, :, :]
     temp = np.tile(temp, (temp.shape[1], 1, 1))
     feature = np.concatenate([temp, np.transpose(temp, [1, 0, 2])], 2)
-    #out = true_output
+    # out = true_output
 
-    return seq_len, [i for i in (feature.astype(float)).flatten()], [i for i in zero_mask.flatten()], [i for i in label_mask.flatten()], [i for i in label_mask.flatten()]
+    return (
+        seq_len,
+        [i for i in (feature.astype(float)).flatten()],
+        [i for i in zero_mask.flatten()],
+        [i for i in label_mask.flatten()],
+        [i for i in label_mask.flatten()],
+    )
+
 
 def _int64_feature(value):
     if not isinstance(value, list) and not isinstance(value, np.ndarray):
@@ -64,39 +77,50 @@ def _float_feature(value):
 def _bytes_feature(value):
     """Wrapper for inserting bytes features into Example proto."""
     if isinstance(value, six.string_types):
-        value = six.binary_type(value, encoding='utf-8')
+        value = six.binary_type(value, encoding="utf-8")
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
 
 def create_tfr_files(all_seq, base_path, input_file):
 
-    print('\nPreparing tfr records file for SPOT-RNA:')
-    path_tfrecords = os.path.join(base_path, 'input_tfr_files', input_file+'.tfrecords')
+    print("\nPreparing tfr records file for SPOT-RNA:")
+    os.makedirs(os.path.join(base_path, "input_tfr_files"), exist_ok=True)
+    path_tfrecords = os.path.join(
+        base_path, "input_tfr_files", input_file + ".tfrecords"
+    )
     with open(all_seq) as file:
         input_data = [line.strip() for line in file.read().splitlines() if line.strip()]
 
-    count = int(len(input_data)/2)
+    count = int(len(input_data) / 2)
 
-    ids = [input_data[2*i][1:].strip() for i in range(count)]
-    
+    ids = [input_data[2 * i][1:].strip() for i in range(count)]
+
     with tf.io.TFRecordWriter(path_tfrecords) as writer:
         for i in tqdm(range(len(ids))):
-            name     = input_data[2*i].replace(">", "") 
-            sequence = input_data[2*i+1].replace(" ", "").upper().replace("T", "U")
-            #print(sequence[-1])
-            
-            #print(len(sequence), name)                
+            name = input_data[2 * i].replace(">", "")
+            sequence = input_data[2 * i + 1].replace(" ", "").upper().replace("T", "U")
+            # print(sequence[-1])
+
+            # print(len(sequence), name)
             seq_len, feature, zero_mask, label_mask, true_label = get_data(sequence)
 
-            example = tf.train.Example(features=tf.train.Features(feature={'rna_name': _bytes_feature(name),
-                                                                           'seq_len': _int64_feature(seq_len),
-                                                                           'feature': _float_feature(feature),
-                                                                           'zero_mask': _float_feature(zero_mask),
-                                                                           'label_mask': _float_feature(label_mask),
-                                                                           'true_label': _float_feature(true_label)}))
+            example = tf.train.Example(
+                features=tf.train.Features(
+                    feature={
+                        "rna_name": _bytes_feature(name),
+                        "seq_len": _int64_feature(seq_len),
+                        "feature": _float_feature(feature),
+                        "zero_mask": _float_feature(zero_mask),
+                        "label_mask": _float_feature(label_mask),
+                        "true_label": _float_feature(true_label),
+                    }
+                )
+            )
 
             writer.write(example.SerializeToString())
 
     writer.close()
+
 
 # ----------------------- hair pin loop assumption i - j < 2 --------------------------------#
 def hair_pin_assumption(pred_pairs):
@@ -107,6 +131,7 @@ def hair_pin_assumption(pred_pairs):
             bad_pairs.append(i)
     return bad_pairs
 
+
 def flatten(x):
     result = []
     for el in x:
@@ -115,6 +140,7 @@ def flatten(x):
         else:
             result.append(el)
     return result
+
 
 def type_pairs(pairs, sequence):
     sequence = [i.upper() for i in sequence]
@@ -125,19 +151,20 @@ def type_pairs(pairs, sequence):
     GU_pair = []
     other_pairs = []
     for i in pairs:
-        if [sequence[i[0]],sequence[i[1]]] in [["A","U"], ["U","A"]]:
+        if [sequence[i[0]], sequence[i[1]]] in [["A", "U"], ["U", "A"]]:
             AU_pair.append(i)
-        elif [sequence[i[0]],sequence[i[1]]] in [["G","C"], ["C","G"]]:
+        elif [sequence[i[0]], sequence[i[1]]] in [["G", "C"], ["C", "G"]]:
             GC_pair.append(i)
-        elif [sequence[i[0]],sequence[i[1]]] in [["G","U"], ["U","G"]]:
+        elif [sequence[i[0]], sequence[i[1]]] in [["G", "U"], ["U", "G"]]:
             GU_pair.append(i)
         else:
             other_pairs.append(i)
     watson_pairs_t = AU_pair + GC_pair
     wobble_pairs_t = GU_pair
     other_pairs_t = other_pairs
-        # print(watson_pairs_t, wobble_pairs_t, other_pairs_t)
+    # print(watson_pairs_t, wobble_pairs_t, other_pairs_t)
     return watson_pairs_t, wobble_pairs_t, other_pairs_t
+
 
 # ----------------------- find multiplets pairs--------------------------------#
 def multiplets_pairs(pred_pairs):
@@ -148,7 +175,7 @@ def multiplets_pairs(pred_pairs):
     new_list = sorted(set(temp_list))
     dup_list = []
     for i in range(len(new_list)):
-        if (temp_list.count(new_list[i]) > 1):
+        if temp_list.count(new_list[i]) > 1:
             dup_list.append(new_list[i])
 
     dub_pairs = []
@@ -165,8 +192,9 @@ def multiplets_pairs(pred_pairs):
             if i in k:
                 temp4.append(k)
         temp3.append(temp4)
-        
+
     return temp3
+
 
 def multiplets_free_bp(pred_pairs, y_pred):
     L = len(pred_pairs)
@@ -183,21 +211,40 @@ def multiplets_free_bp(pred_pairs, y_pred):
         pred_pairs = [k for k in pred_pairs if k not in remove_pairs]
         multiplets_bp = multiplets_pairs(pred_pairs)
     save_multiplets = [list(x) for x in set(tuple(x) for x in save_multiplets)]
-    assert L == len(pred_pairs)+len(save_multiplets)
-    #print(L, len(pred_pairs), save_multiplets)
+    assert L == len(pred_pairs) + len(save_multiplets)
+    # print(L, len(pred_pairs), save_multiplets)
     return pred_pairs, save_multiplets
-        
+
+
 def output_mask(seq, NC=True):
     if NC:
-        include_pairs = ['AU', 'UA', 'GC', 'CG', 'GU', 'UG', 'CC', 'GG', 'AG', 'CA', 'AC', 'UU', 'AA', 'CU', 'GA', 'UC']
+        include_pairs = [
+            "AU",
+            "UA",
+            "GC",
+            "CG",
+            "GU",
+            "UG",
+            "CC",
+            "GG",
+            "AG",
+            "CA",
+            "AC",
+            "UU",
+            "AA",
+            "CU",
+            "GA",
+            "UC",
+        ]
     else:
-        include_pairs = ['AU', 'UA', 'GC', 'CG', 'GU', 'UG']
+        include_pairs = ["AU", "UA", "GC", "CG", "GU", "UG"]
     mask = np.zeros((len(seq), len(seq)))
     for i, I in enumerate(seq):
         for j, J in enumerate(seq):
             if str(I) + str(J) in include_pairs:
                 mask[i, j] = 1
     return mask
+
 
 def ct_file_output(pairs, seq, id, save_result_path):
 
@@ -211,32 +258,56 @@ def ct_file_output(pairs, seq, id, save_result_path):
         col5[I[0]] = int(I[1]) + 1
         col5[I[1]] = int(I[0]) + 1
     col6 = np.arange(1, len(seq) + 1, 1)
-    temp = np.vstack((np.char.mod('%d', col1), col2, np.char.mod('%d', col3), np.char.mod('%d', col4),
-                      np.char.mod('%d', col5), np.char.mod('%d', col6))).T
-    #os.chdir(save_result_path)
-    #print(os.path.join(save_result_path, str(id[0:-1]))+'.spotrna')
-    np.savetxt(os.path.join(save_result_path, str(id))+'.ct', (temp), delimiter='\t\t', fmt="%s", header=str(len(seq)) + '\t\t' + str(id) + '\t\t' + 'SPOT-RNA output\n' , comments='')
+    temp = np.vstack(
+        (
+            np.char.mod("%d", col1),
+            col2,
+            np.char.mod("%d", col3),
+            np.char.mod("%d", col4),
+            np.char.mod("%d", col5),
+            np.char.mod("%d", col6),
+        )
+    ).T
+    # os.chdir(save_result_path)
+    # print(os.path.join(save_result_path, str(id[0:-1]))+'.spotrna')
+    np.savetxt(
+        os.path.join(save_result_path, str(id)) + ".ct",
+        (temp),
+        delimiter="\t\t",
+        fmt="%s",
+        header=str(len(seq)) + "\t\t" + str(id) + "\t\t" + "SPOT-RNA output\n",
+        comments="",
+    )
 
     return
+
 
 def bpseq_file_output(pairs, seq, id, save_result_path):
 
     col1 = np.arange(1, len(seq) + 1, 1)
     col2 = np.array([i for i in seq])
-    #col3 = np.arange(0, len(seq), 1)
-    #col4 = np.append(np.delete(col1, 0), [0])
+    # col3 = np.arange(0, len(seq), 1)
+    # col4 = np.append(np.delete(col1, 0), [0])
     col5 = np.zeros(len(seq), dtype=int)
 
     for i, I in enumerate(pairs):
         col5[I[0]] = int(I[1]) + 1
         col5[I[1]] = int(I[0]) + 1
-    #col6 = np.arange(1, len(seq) + 1, 1)
-    temp = np.vstack((np.char.mod('%d', col1), col2, np.char.mod('%d', col5))).T
-    #os.chdir(save_result_path)
-    #print(os.path.join(save_result_path, str(id[0:-1]))+'.spotrna')
-    np.savetxt(os.path.join(save_result_path, str(id))+'.bpseq', (temp), delimiter=' ', fmt="%s", header='#' + str(id) , comments='')
+    # col6 = np.arange(1, len(seq) + 1, 1)
+    temp = np.vstack((np.char.mod("%d", col1), col2, np.char.mod("%d", col5))).T
+    # os.chdir(save_result_path)
+    # print(os.path.join(save_result_path, str(id[0:-1]))+'.spotrna')
+    np.savetxt(
+        os.path.join(save_result_path, str(id)) + ".bpseq",
+        (temp),
+        delimiter=" ",
+        fmt="%s",
+        header="#" + str(id),
+        comments="",
+    )
 
     return
+
 
 def lone_pair(pairs):
     lone_pairs = []
@@ -247,8 +318,11 @@ def lone_pair(pairs):
 
     return lone_pairs
 
-def prob_to_secondary_structure(ensemble_outputs, label_mask, seq, name, args, base_path):
-    #save_result_path = 'outputs'
+
+def prob_to_secondary_structure(
+    ensemble_outputs, label_mask, seq, name, args, base_path
+):
+    # save_result_path = 'outputs'
     Threshold = 0.335
     test_output = ensemble_outputs
     mask = output_mask(seq)
@@ -262,14 +336,20 @@ def prob_to_secondary_structure(ensemble_outputs, label_mask, seq, name, args, b
 
     out_pred = y_pred[tri_inds]
     outputs = out_pred[:, None]
-    seq_pairs = [[tri_inds[0][j], tri_inds[1][j], ''.join([seq[tri_inds[0][j]], seq[tri_inds[1][j]]])] for j in
-                 range(tri_inds[0].shape[0])]
+    seq_pairs = [
+        [
+            tri_inds[0][j],
+            tri_inds[1][j],
+            "".join([seq[tri_inds[0][j]], seq[tri_inds[1][j]]]),
+        ]
+        for j in range(tri_inds[0].shape[0])
+    ]
 
     outputs_T = np.greater_equal(outputs, Threshold)
     pred_pairs = [i for I, i in enumerate(seq_pairs) if outputs_T[I]]
     pred_pairs = [i[:2] for i in pred_pairs]
     pred_pairs, save_multiplets = multiplets_free_bp(pred_pairs, y_pred)
-    
+
     watson_pairs, wobble_pairs, noncanonical_pairs = type_pairs(pred_pairs, seq)
     lone_bp = lone_pair(pred_pairs)
 
@@ -277,40 +357,107 @@ def prob_to_secondary_structure(ensemble_outputs, label_mask, seq, name, args, b
     tertiary_bp = [list(x) for x in set(tuple(x) for x in tertiary_bp)]
 
     str_tertiary = []
-    for i,I in enumerate(tertiary_bp):
-        if i==0: 
-            str_tertiary += ('(' + str(I[0]+1) + ',' + str(I[1]+1) + '):color=""#FFFF00""')
+    for i, I in enumerate(tertiary_bp):
+        if i == 0:
+            str_tertiary += (
+                "(" + str(I[0] + 1) + "," + str(I[1] + 1) + '):color=""#FFFF00""'
+            )
         else:
-            str_tertiary += (';(' + str(I[0]+1) + ',' + str(I[1]+1) + '):color=""#FFFF00""')   
-        
-    tertiary_bp = ''.join(str_tertiary) 
+            str_tertiary += (
+                ";(" + str(I[0] + 1) + "," + str(I[1] + 1) + '):color=""#FFFF00""'
+            )
 
-    if args.outputs=='outputs/':
+    tertiary_bp = "".join(str_tertiary)
+
+    if args.outputs == "outputs/":
         output_path = os.path.join(base_path, args.outputs)
     else:
         output_path = args.outputs
 
+    os.makedirs(output_path, exist_ok=True)
+
     ct_file_output(pred_pairs, seq, name, output_path)
     bpseq_file_output(pred_pairs, seq, name, output_path)
-    np.savetxt(output_path + '/'+ name +'.prob', y_pred, delimiter='\t')
-    
+    prob_path = os.path.join(output_path, name + ".prob")
+    ct_path = os.path.join(output_path, name + ".ct")
+    radiate_plot_path = os.path.join(output_path, name + "_radiate.png")
+    line_plot_path = os.path.join(output_path, name + "_line.png")
+    st_path = os.path.join(output_path, name + ".st")
+    dbn_path = os.path.join(output_path, name + ".dbn")
+
+    np.savetxt(prob_path, y_pred, delimiter="\t")
+
     if args.plots:
         try:
-            subprocess.Popen(["java", "-cp", base_path + "/utils/VARNAv3-93.jar", "fr.orsay.lri.varna.applications.VARNAcmd", '-i', output_path + name + '.ct', '-o', output_path + name + '_radiate.png', '-algorithm', 'radiate', '-resolution', '8.0', '-bpStyle', 'lw', '-auxBPs', tertiary_bp], stderr=subprocess.STDOUT, stdout=subprocess.PIPE).communicate()[0]
-            subprocess.Popen(["java", "-cp", base_path + "/utils/VARNAv3-93.jar", "fr.orsay.lri.varna.applications.VARNAcmd", '-i', output_path + name + '.ct', '-o', output_path + name + '_line.png', '-algorithm', 'line', '-resolution', '8.0', '-bpStyle', 'lw', '-auxBPs', tertiary_bp], stderr=subprocess.STDOUT, stdout=subprocess.PIPE).communicate()[0]
+            subprocess.Popen(
+                [
+                    "java",
+                    "-cp",
+                    base_path + "/utils/VARNAv3-93.jar",
+                    "fr.orsay.lri.varna.applications.VARNAcmd",
+                    "-i",
+                    ct_path,
+                    "-o",
+                    radiate_plot_path,
+                    "-algorithm",
+                    "radiate",
+                    "-resolution",
+                    "8.0",
+                    "-bpStyle",
+                    "lw",
+                    "-auxBPs",
+                    tertiary_bp,
+                ],
+                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+            ).communicate()[0]
+            subprocess.Popen(
+                [
+                    "java",
+                    "-cp",
+                    base_path + "/utils/VARNAv3-93.jar",
+                    "fr.orsay.lri.varna.applications.VARNAcmd",
+                    "-i",
+                    ct_path,
+                    "-o",
+                    line_plot_path,
+                    "-algorithm",
+                    "line",
+                    "-resolution",
+                    "8.0",
+                    "-bpStyle",
+                    "lw",
+                    "-auxBPs",
+                    tertiary_bp,
+                ],
+                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+            ).communicate()[0]
         except:
-            print('\nUnable to generate 2D plots;\nplease refer to "http://varna.lri.fr/" for system requirments to use VARNA')	
+            print(
+                '\nUnable to generate 2D plots;\nplease refer to "http://varna.lri.fr/" for system requirments to use VARNA'
+            )
 
     if args.motifs:
         try:
             os.chdir(output_path)
-            p = subprocess.Popen(['perl', base_path + '/utils/bpRNA-master/bpRNA.pl', name + '.bpseq'])
+            p = subprocess.Popen(
+                ["perl", base_path + "/utils/bpRNA-master/bpRNA.pl", name + ".bpseq"]
+            )
             time.sleep(0.1)
-            #print(os.path.exists(output_path + '/' + name + '.st'))
-            with open(output_path + '/' + name + '.st') as f:
-                df = pd.read_csv(f, comment='#', sep=";", header=None)
-            np.savetxt(output_path + '/'+ name +'.dbn', np.array([df[0][0], df[0][1]]), fmt="%s", header='>' + name, comments='')
+            # print(os.path.exists(output_path + '/' + name + '.st'))
+            with open(st_path) as f:
+                df = pd.read_csv(f, comment="#", sep=";", header=None)
+            np.savetxt(
+                dbn_path,
+                np.array([df[0][0], df[0][1]]),
+                fmt="%s",
+                header=">" + name,
+                comments="",
+            )
         except:
-            print('\nUnable to run bpRNA script;\nplease refer to "https://github.com/hendrixlab/bpRNA/" for system requirments to use bpRNA')
+            print(
+                '\nUnable to run bpRNA script;\nplease refer to "https://github.com/hendrixlab/bpRNA/" for system requirments to use bpRNA'
+            )
         os.chdir(base_path)
     return

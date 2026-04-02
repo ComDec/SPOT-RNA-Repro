@@ -1,0 +1,14 @@
+.git
+.worktrees
+__pycache__/
+*.pyc
+logs/
+outputs/
+outputs*/
+profiling/
+SPOT-RNA-models/
+training_runs/
+training_runs_*/
+datasets/.spotrna_cache/
+datasets/*.zip
+input_tfr_files/*.tfrecords
